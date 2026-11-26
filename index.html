@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Incidencias Recepción</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#1e293b">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Barra superior -->
+  <header class="app-header">
+    <div>
+      <h1>📦 Recepción</h1>
+      <p class="subtitle">Parte rápido de incidencias</p>
+    </div>
+    <button id="btnConfig" class="icon-btn" title="Ajustes">⚙️</button>
+  </header>
+
+  <!-- Navegación por pestañas -->
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="nueva">➕ Nueva Incidencia</button>
+    <button class="tab-btn" data-tab="historial">📋 Historial</button>
+  </nav>
+
+  <!-- VISTA 1: NUEVA INCIDENCIA -->
+  <main id="tab-nueva" class="tab-content active">
+    <form id="formIncidencia">
+      
+      <!-- 1. Identificación -->
+      <section class="card">
+        <h2>1. Datos del envío</h2>
+        
+        <label for="pedido">Nº de Pedido (interno) *</label>
+        <input type="text" id="pedido" inputmode="numeric" placeholder="Ej: 45678985" required>
+
+        <label for="proveedor">Proveedor</label>
+        <input type="text" id="proveedor" list="listaProveedores" placeholder="Escribe o elige proveedor...">
+        <datalist id="listaProveedores"></datalist>
+
+        <label for="empresaEntrega">Empresa que entrega (Transporte)</label>
+        <input type="text" id="empresaEntrega" list="listaTransportes" placeholder="Ej: DHL, Seur, Agencia...">
+        <datalist id="listaTransportes"></datalist>
+      </section>
+
+      <!-- 2. Tipo de Incidencia -->
+      <section class="card">
+        <h2>2. ¿Qué ocurre? *</h2>
+        
+        <div class="cat-grid" id="categoriasContainer">
+          <button type="button" class="cat-btn" data-cat="Partida incompleta">📦 Partida incompleta</button>
+          <button type="button" class="cat-btn" data-cat="Falta de documentación">📄 Falta de documentación</button>
+          <button type="button" class="cat-btn" data-cat="Material no viene en condiciones">⚠️ Material no en condiciones</button>
+        </div>
+
+        <!-- Sub-opciones dinámicas -->
+        <div id="subopcionesContainer" class="sub-box hidden">
+          <p class="sub-title">Marca el detalle (puedes elegir varios):</p>
+          <div id="chipsContainer" class="chips-grid"></div>
+        </div>
+      </section>
+
+      <!-- 3. Evidencia y notas -->
+      <section class="card">
+        <h2>3. Foto y Observaciones</h2>
+        
+        <label class="camera-btn" for="fotoInput">
+          📸 <span id="fotoLabelText">Hacer / Adjuntar Foto</span>
+        </label>
+        <input type="file" id="fotoInput" accept="image/*" capture="environment" class="hidden">
+
+        <div id="previewContainer" class="preview-box hidden">
+          <img id="fotoPreview" alt="Vista previa">
+          <button type="button" id="btnQuitarFoto" class="btn-danger-small">❌ Quitar foto</button>
+        </div>
+
+        <label for="observaciones" style="margin-top: 12px;">Observaciones (opcional)</label>
+        <textarea id="observaciones" rows="2" placeholder="Algún detalle extra para tus jefes..."></textarea>
+      </section>
+
+      <button type="submit" id="btnEnviar" class="btn-primary">
+        🚀 Registrar y Enviar Correo
+      </button>
+    </form>
+  </main>
+
+  <!-- VISTA 2: HISTORIAL -->
+  <section id="tab-historial" class="tab-content hidden">
+    <div class="card">
+      <div class="historial-header">
+        <input type="text" id="buscadorHistorial" placeholder="🔍 Buscar por nº pedido o proveedor...">
+        <button type="button" id="btnRefrescar" class="btn-secondary">🔄</button>
+      </div>
+      <div id="listaHistorial" class="historial-list">
+        <p class="empty-msg">Pulsa 🔄 para cargar las últimas incidencias.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- MODAL DE CONFIGURACIÓN (Se guarda solo en tu móvil) -->
+  <div id="modalConfig" class="modal hidden">
+    <div class="modal-content">
+      <h2>⚙️ Conexión Privada</h2>
+      <p class="info-text">Estos datos se guardan <strong>solo en tu teléfono</strong>, nunca en GitHub.</p>
+      
+      <label for="cfgUrl">URL del Script de Google (/exec)</label>
+      <input type="url" id="cfgUrl" placeholder="https://script.google.com/macros/s/.../exec">
+
+      <label for="cfgPin">Tu PIN Secreto</label>
+      <input type="password" id="cfgPin" inputmode="numeric" placeholder="Tu PIN privado">
+
+      <div class="modal-actions">
+        <button type="button" id="btnCerrarConfig" class="btn-secondary">Cancelar</button>
+        <button type="button" id="btnGuardarConfig" class="btn-primary">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notificación flotante -->
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
