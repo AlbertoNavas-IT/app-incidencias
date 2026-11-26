@@ -1,4 +1,3 @@
-// Sub-opciones exactas para cada categoría
 const SUBOPCIONES = {
   "Partida incompleta": [
     "Falta algún bulto",
@@ -10,7 +9,7 @@ const SUBOPCIONES = {
   ],
   "Material no viene en condiciones": [
     "Palet roto",
-    "Esquinas sin cubrir",
+    "Picos punzantes sin cubrir",
     "Material sin flejar",
     "Material dañado"
   ]
@@ -21,7 +20,6 @@ let detallesSeleccionados = new Set();
 let fotoComprimidaBase64 = "";
 let historialCache = [];
 
-// Inicialización al cargar
 document.addEventListener("DOMContentLoaded", () => {
   cargarSugerenciasLocales();
   verificarConfiguracionInicial();
@@ -29,15 +27,14 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 function verificarConfiguracionInicial() {
-  const url = localStorage.getItem("cfg_url");
-  const pin = localStorage.getItem("cfg_pin");
+  const url = (localStorage.getItem("cfg_url") || "").trim();
+  const pin = (localStorage.getItem("cfg_pin") || "").trim();
   if (!url || !pin) {
     abrirModalConfig();
   }
 }
 
 function configurarEventos() {
-  // Navegación pestañas
   document.querySelectorAll(".tab-btn").forEach(btn => {
     btn.addEventListener("click", () => {
       document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
@@ -51,7 +48,6 @@ function configurarEventos() {
     });
   });
 
-  // Selección de categoría principal
   document.querySelectorAll(".cat-btn").forEach(btn => {
     btn.addEventListener("click", () => {
       document.querySelectorAll(".cat-btn").forEach(b => b.classList.remove("selected"));
@@ -62,24 +58,22 @@ function configurarEventos() {
     });
   });
 
-  // Procesar foto al hacerla/elegirla
   document.getElementById("fotoInput").addEventListener("change", async (e) => {
     const file = e.target.files[0];
     if (!file) return;
     mostrarToast("Procesando foto...");
     try {
       const dataUrl = await comprimirImagen(file, 1280, 0.78);
-      fotoComprimidaBase64 = dataUrl.split(",")[1];
+      fotoComprimidaBase64 = dataUrl.split(",")[1] || "";
       document.getElementById("fotoPreview").src = dataUrl;
       document.getElementById("previewContainer").classList.remove("hidden");
       document.getElementById("fotoLabelText").textContent = "Cambiar foto";
-      mostrarToast("Foto lista ✅");
+      mostrarToast("Foto lista");
     } catch (err) {
       mostrarToast("Error al procesar la foto");
     }
   });
 
-  // Quitar foto
   document.getElementById("btnQuitarFoto").addEventListener("click", () => {
     fotoComprimidaBase64 = "";
     document.getElementById("fotoInput").value = "";
@@ -87,17 +81,14 @@ function configurarEventos() {
     document.getElementById("fotoLabelText").textContent = "Hacer / Adjuntar Foto";
   });
 
-  // Envío del formulario
   document.getElementById("formIncidencia").addEventListener("submit", enviarIncidencia);
 
-  // Modal configuración
   document.getElementById("btnConfig").addEventListener("click", abrirModalConfig);
   document.getElementById("btnCerrarConfig").addEventListener("click", () => {
     document.getElementById("modalConfig").classList.add("hidden");
   });
   document.getElementById("btnGuardarConfig").addEventListener("click", guardarConfiguracion);
 
-  // Historial
   document.getElementById("btnRefrescar").addEventListener("click", cargarHistorial);
   document.getElementById("buscadorHistorial").addEventListener("input", filtrarHistorial);
 }
@@ -133,7 +124,6 @@ function renderizarSubopciones(categoria) {
   container.classList.remove("hidden");
 }
 
-// Comprime la imagen en el navegador para que el envío tarde 2 segundos
 function comprimirImagen(file, maxAncho, calidad) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -164,8 +154,8 @@ function comprimirImagen(file, maxAncho, calidad) {
 async function enviarIncidencia(e) {
   e.preventDefault();
 
-  const url = localStorage.getItem("cfg_url");
-  const pin = localStorage.getItem("cfg_pin");
+  const url = (localStorage.getItem("cfg_url") || "").trim();
+  const pin = (localStorage.getItem("cfg_pin") || "").trim();
 
   if (!url || !pin) {
     abrirModalConfig();
@@ -179,17 +169,17 @@ async function enviarIncidencia(e) {
   const observaciones = document.getElementById("observaciones").value.trim();
 
   if (!pedido) {
-    mostrarToast("⚠️ Introduce el nº de pedido");
+    mostrarToast("Introduce el nº de pedido");
     return;
   }
   if (!categoriaSeleccionada) {
-    mostrarToast("⚠️ Selecciona qué tipo de incidencia ocurre");
+    mostrarToast("Selecciona qué tipo de incidencia ocurre");
     return;
   }
 
   const btnEnviar = document.getElementById("btnEnviar");
   btnEnviar.disabled = true;
-  btnEnviar.textContent = "⏳ Guardando y enviando correo...";
+  btnEnviar.textContent = "Guardando y enviando correo...";
 
   const payload = {
     pin: pin,
@@ -210,23 +200,30 @@ async function enviarIncidencia(e) {
       },
       body: JSON.stringify(payload)
     });
-    const res = await resp.json();
+
+    const texto = await resp.text();
+    let res;
+    try {
+      res = JSON.parse(texto);
+    } catch (_) {
+      throw new Error("Respuesta no válida del servidor");
+    }
 
     if (res.ok) {
       guardarSugerenciaLocal("proveedores", proveedor);
       guardarSugerenciaLocal("transportes", empresaEntrega);
       cargarSugerenciasLocales();
       limpiarFormulario();
-      historialCache = []; // Forzar recarga al mirar historial
-      mostrarToast("✅ ¡Registrado y correo enviado!");
+      historialCache = [];
+      mostrarToast("Registrado y correo enviado");
     } else {
-      mostrarToast("❌ Error: " + (res.error || "No se pudo enviar"));
+      mostrarToast("Error: " + (res.error || "No se pudo enviar"));
     }
   } catch (err) {
-    mostrarToast("❌ Error de red al conectar con el servidor");
+    mostrarToast("Fallo al enviar: " + (err && err.message ? err.message : "revisa URL/red"));
   } finally {
     btnEnviar.disabled = false;
-    btnEnviar.textContent = "🚀 Registrar y Enviar Correo";
+    btnEnviar.textContent = "Registrar y Enviar Correo";
   }
 }
 
@@ -241,7 +238,6 @@ function limpiarFormulario() {
   document.getElementById("fotoLabelText").textContent = "Hacer / Adjuntar Foto";
 }
 
-// Autocompletado de proveedores y transportes habituales en el móvil
 function guardarSugerenciaLocal(clave, valor) {
   if (!valor) return;
   const lista = JSON.parse(localStorage.getItem(clave) || "[]");
@@ -255,18 +251,17 @@ function cargarSugerenciasLocales() {
   const provs = JSON.parse(localStorage.getItem("proveedores") || "[]");
   const trans = JSON.parse(localStorage.getItem("transportes") || "[]");
 
-  document.getElementById("listaProveedores").innerHTML = provs.map(p => `<option value="${p}">`).join("");
-  document.getElementById("listaTransportes").innerHTML = trans.map(t => `<option value="${t}">`).join("");
+  document.getElementById("listaProveedores").innerHTML = provs.map(p => `<option value="${escapeHtml(p)}">`).join("");
+  document.getElementById("listaTransportes").innerHTML = trans.map(t => `<option value="${escapeHtml(t)}">`).join("");
 }
 
-// Historial
 async function cargarHistorial() {
-  const url = localStorage.getItem("cfg_url");
-  const pin = localStorage.getItem("cfg_pin");
+  const url = (localStorage.getItem("cfg_url") || "").trim();
+  const pin = (localStorage.getItem("cfg_pin") || "").trim();
   const contenedor = document.getElementById("listaHistorial");
 
   if (!url || !pin) return;
-  contenedor.innerHTML = `<p class="empty-msg">⏳ Cargando últimas incidencias...</p>`;
+  contenedor.innerHTML = `<p class="empty-msg">Cargando últimas incidencias...</p>`;
 
   try {
     const resp = await fetch(`${url}?pin=${encodeURIComponent(pin)}`);
@@ -275,27 +270,27 @@ async function cargarHistorial() {
       historialCache = res.historial || [];
       renderizarHistorial(historialCache);
     } else {
-      contenedor.innerHTML = `<p class="empty-msg">❌ ${res.error}</p>`;
+      contenedor.innerHTML = `<p class="empty-msg">${escapeHtml(res.error || "Error al consultar")}</p>`;
     }
   } catch (err) {
-    contenedor.innerHTML = `<p class="empty-msg">❌ Error al cargar el historial.</p>`;
+    contenedor.innerHTML = `<p class="empty-msg">Error al cargar el historial.</p>`;
   }
 }
 
 function renderizarHistorial(lista) {
   const contenedor = document.getElementById("listaHistorial");
-  if (lista.length === 0) {
+  if (!lista || lista.length === 0) {
     contenedor.innerHTML = `<p class="empty-msg">No hay incidencias registradas todavía.</p>`;
     return;
   }
 
   contenedor.innerHTML = lista.map(item => `
     <div class="historial-item">
-      <h3>Pedido: ${item.pedido} — ${item.proveedor}</h3>
-      <div class="historial-meta">📅 ${item.fecha} ${item.hora} · 🚚 ${item.empresaEntrega}</div>
-      <span class="historial-tag">${item.categoria} (${item.detalle})</span>
-      ${item.observaciones && item.observaciones !== "Ninguna" ? `<p class="historial-meta" style="margin-top:6px;">📝 ${item.observaciones}</p>` : ""}
-      ${item.fotoUrl && item.fotoUrl !== "Sin foto" ? `<br><a href="${item.fotoUrl}" target="_blank" class="historial-link">🖼️ Ver foto en Drive</a>` : ""}
+      <h3>Pedido: ${escapeHtml(item.pedido)} — ${escapeHtml(item.proveedor)}</h3>
+      <div class="historial-meta">${escapeHtml(item.fecha)} ${escapeHtml(item.hora)} · ${escapeHtml(item.empresaEntrega)}</div>
+      <span class="historial-tag">${escapeHtml(item.categoria)} (${escapeHtml(item.detalle)})</span>
+      ${item.observaciones && item.observaciones !== "Ninguna" ? `<p class="historial-meta" style="margin-top:6px;">${escapeHtml(item.observaciones)}</p>` : ""}
+      ${item.fotoUrl && item.fotoUrl !== "Sin foto" ? `<br><a href="${escapeHtml(item.fotoUrl)}" target="_blank" rel="noopener" class="historial-link">Ver foto en Drive</a>` : ""}
     </div>
   `).join("");
 }
@@ -310,7 +305,6 @@ function filtrarHistorial(e) {
   renderizarHistorial(filtrados);
 }
 
-// Ajustes
 function abrirModalConfig() {
   document.getElementById("cfgUrl").value = localStorage.getItem("cfg_url") || "";
   document.getElementById("cfgPin").value = localStorage.getItem("cfg_pin") || "";
@@ -327,12 +321,21 @@ function guardarConfiguracion() {
   localStorage.setItem("cfg_url", url);
   localStorage.setItem("cfg_pin", pin);
   document.getElementById("modalConfig").classList.add("hidden");
-  mostrarToast("Configuración guardada en este móvil ✅");
+  mostrarToast("Configuración guardada en este dispositivo");
 }
 
 function mostrarToast(msg) {
   const toast = document.getElementById("toast");
   toast.textContent = msg;
   toast.classList.remove("hidden");
-  setTimeout(() => toast.classList.add("hidden"), 3200);
+  setTimeout(() => toast.classList.add("hidden"), 3500);
+}
+
+function escapeHtml(str) {
+  return String(str ?? "")
+    .replace(/&/g, "&")
+    .replace(/</g, "<")
+    .replace(/>/g, ">")
+    .replace(/"/g, """)
+    .replace(/'/g, "'");
 }
