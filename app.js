@@ -10,7 +10,7 @@ const SUBOPCIONES = {
   ],
   "Material no viene en condiciones": [
     "Palet roto",
-    "Picos punzantes sin cubrir",
+    "Esquinas sin cubrir",
     "Material sin flejar",
     "Material dañado"
   ]
