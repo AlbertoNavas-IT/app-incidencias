@@ -18,7 +18,10 @@ const SUBOPCIONES = {
 let categoriaSeleccionada = "";
 let detallesSeleccionados = new Set();
 let fotoComprimidaBase64 = "";
-let historialCache = [];
+let procesamientoFoto = null;
+let historialCache = null;
+let versionHistorial = 0;
+let temporizadorToast;
 
 document.addEventListener("DOMContentLoaded", () => {
   cargarSugerenciasLocales();
@@ -42,7 +45,7 @@ function configurarEventos() {
       btn.classList.add("active");
       document.getElementById(`tab-${btn.dataset.tab}`).classList.remove("hidden");
 
-      if (btn.dataset.tab === "historial" && historialCache.length === 0) {
+      if (btn.dataset.tab === "historial" && !historialCache?.length) {
         cargarHistorial();
       }
     });
@@ -60,26 +63,33 @@ function configurarEventos() {
 
   document.getElementById("fotoInput").addEventListener("change", async (e) => {
     const file = e.target.files[0];
-    if (!file) return;
+    if (!file) {
+      limpiarFoto();
+      return;
+    }
+    const proceso = comprimirImagen(file, 1280, 0.78);
+    procesamientoFoto = proceso;
     mostrarToast("Procesando foto...");
     try {
-      const dataUrl = await comprimirImagen(file, 1280, 0.78);
-      fotoComprimidaBase64 = dataUrl.split(",")[1] || "";
+      const dataUrl = await proceso;
+      if (procesamientoFoto !== proceso) return;
+
+      fotoComprimidaBase64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
       document.getElementById("fotoPreview").src = dataUrl;
       document.getElementById("previewContainer").classList.remove("hidden");
       document.getElementById("fotoLabelText").textContent = "Cambiar foto";
       mostrarToast("Foto lista");
-    } catch (err) {
-      mostrarToast("Error al procesar la foto");
+    } catch {
+      if (procesamientoFoto === proceso) {
+        limpiarFoto();
+        mostrarToast("No se pudo procesar la foto");
+      }
+    } finally {
+      if (procesamientoFoto === proceso) procesamientoFoto = null;
     }
   });
 
-  document.getElementById("btnQuitarFoto").addEventListener("click", () => {
-    fotoComprimidaBase64 = "";
-    document.getElementById("fotoInput").value = "";
-    document.getElementById("previewContainer").classList.add("hidden");
-    document.getElementById("fotoLabelText").textContent = "Hacer / Adjuntar Foto";
-  });
+  document.getElementById("btnQuitarFoto").addEventListener("click", limpiarFoto);
 
   document.getElementById("formIncidencia").addEventListener("submit", enviarIncidencia);
 
@@ -124,35 +134,43 @@ function renderizarSubopciones(categoria) {
   container.classList.remove("hidden");
 }
 
-function comprimirImagen(file, maxAncho, calidad) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const img = new Image();
-      img.onload = () => {
-        let width = img.width;
-        let height = img.height;
-        if (width > maxAncho) {
-          height = Math.round((height * maxAncho) / width);
-          width = maxAncho;
-        }
-        const canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL("image/jpeg", calidad));
-      };
-      img.onerror = reject;
-      img.src = event.target.result;
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
+function limpiarFoto() {
+  procesamientoFoto = null;
+  fotoComprimidaBase64 = "";
+  document.getElementById("fotoInput").value = "";
+  document.getElementById("fotoPreview").removeAttribute("src");
+  document.getElementById("previewContainer").classList.add("hidden");
+  document.getElementById("fotoLabelText").textContent = "Hacer / Adjuntar Foto";
+}
+
+async function comprimirImagen(file, maxLado, calidad) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+
+    const escala = Math.min(1, maxLado / Math.max(img.naturalWidth, img.naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(img.naturalWidth * escala));
+    canvas.height = Math.max(1, Math.round(img.naturalHeight * escala));
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+    const dataUrl = canvas.toDataURL("image/jpeg", calidad);
+    if (!dataUrl.startsWith("data:image/jpeg;base64,")) {
+      throw new Error("No se pudo generar un JPEG");
+    }
+    return dataUrl;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 async function enviarIncidencia(e) {
   e.preventDefault();
+  const btnEnviar = document.getElementById("btnEnviar");
+  if (btnEnviar.disabled) return;
 
   const url = (localStorage.getItem("cfg_url") || "").trim();
   const pin = (localStorage.getItem("cfg_pin") || "").trim();
@@ -176,9 +194,15 @@ async function enviarIncidencia(e) {
     mostrarToast("Selecciona qué tipo de incidencia ocurre");
     return;
   }
+  if (procesamientoFoto) {
+    mostrarToast("Espera a que termine de procesarse la foto");
+    return;
+  }
 
-  const btnEnviar = document.getElementById("btnEnviar");
+  const controlesActivos = Array.from(e.currentTarget.elements)
+    .filter(control => control !== btnEnviar && control.disabled === false);
   btnEnviar.disabled = true;
+  controlesActivos.forEach(control => { control.disabled = true; });
   btnEnviar.textContent = "Guardando y enviando correo...";
 
   const payload = {
@@ -201,108 +225,158 @@ async function enviarIncidencia(e) {
       body: JSON.stringify(payload)
     });
 
-    const texto = await resp.text();
-    let res;
-    try {
-      res = JSON.parse(texto);
-    } catch (_) {
-      throw new Error("Respuesta no válida del servidor");
-    }
+    await leerRespuesta(resp);
 
-    if (res.ok) {
-      guardarSugerenciaLocal("proveedores", proveedor);
-      guardarSugerenciaLocal("transportes", empresaEntrega);
-      cargarSugerenciasLocales();
-      limpiarFormulario();
-      historialCache = [];
-      mostrarToast("Registrado y correo enviado");
-    } else {
-      mostrarToast("Error: " + (res.error || "No se pudo enviar"));
-    }
+    guardarSugerenciaLocal("proveedores", proveedor);
+    guardarSugerenciaLocal("transportes", empresaEntrega);
+    cargarSugerenciasLocales();
+    limpiarFormulario();
+    invalidarHistorial();
+    mostrarToast("Registrado y correo enviado");
   } catch (err) {
-    mostrarToast("Fallo al enviar: " + (err && err.message ? err.message : "revisa URL/red"));
+    mostrarToast("Fallo al enviar: " + (err?.message || "revisa URL/red"));
   } finally {
+    controlesActivos.forEach(control => { control.disabled = false; });
     btnEnviar.disabled = false;
     btnEnviar.textContent = "Registrar y Enviar Correo";
   }
+}
+
+async function leerRespuesta(resp) {
+  const errorHttp = resp.ok ? "" : `Error HTTP ${resp.status}`;
+  let res;
+  try {
+    res = await resp.json();
+  } catch {
+    throw new Error(errorHttp || "Respuesta no válida del servidor");
+  }
+  if (!resp.ok || !res?.ok) {
+    throw new Error(res?.error || errorHttp || "El servidor no confirmó la operación");
+  }
+  return res;
 }
 
 function limpiarFormulario() {
   document.getElementById("formIncidencia").reset();
   categoriaSeleccionada = "";
   detallesSeleccionados.clear();
-  fotoComprimidaBase64 = "";
+  limpiarFoto();
   document.querySelectorAll(".cat-btn").forEach(b => b.classList.remove("selected"));
+  document.getElementById("chipsContainer").replaceChildren();
   document.getElementById("subopcionesContainer").classList.add("hidden");
-  document.getElementById("previewContainer").classList.add("hidden");
-  document.getElementById("fotoLabelText").textContent = "Hacer / Adjuntar Foto";
+}
+
+function leerSugerenciasLocales(clave) {
+  try {
+    const lista = JSON.parse(localStorage.getItem(clave) || "[]");
+    return Array.isArray(lista) ? lista.filter(item => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 function guardarSugerenciaLocal(clave, valor) {
   if (!valor) return;
-  const lista = JSON.parse(localStorage.getItem(clave) || "[]");
+  const lista = leerSugerenciasLocales(clave);
   if (!lista.some(item => item.toLowerCase() === valor.toLowerCase())) {
     lista.unshift(valor);
-    localStorage.setItem(clave, JSON.stringify(lista.slice(0, 40)));
+    try {
+      localStorage.setItem(clave, JSON.stringify(lista.slice(0, 40)));
+    } catch {
+      // Las sugerencias locales son opcionales.
+    }
   }
 }
 
 function cargarSugerenciasLocales() {
-  const provs = JSON.parse(localStorage.getItem("proveedores") || "[]");
-  const trans = JSON.parse(localStorage.getItem("transportes") || "[]");
+  const provs = leerSugerenciasLocales("proveedores");
+  const trans = leerSugerenciasLocales("transportes");
 
   document.getElementById("listaProveedores").innerHTML = provs.map(p => `<option value="${escapeHtml(p)}">`).join("");
   document.getElementById("listaTransportes").innerHTML = trans.map(t => `<option value="${escapeHtml(t)}">`).join("");
 }
 
+function invalidarHistorial() {
+  versionHistorial++;
+  historialCache = null;
+  if (document.querySelector('.tab-btn.active[data-tab="historial"]')) {
+    cargarHistorial();
+  }
+}
+
 async function cargarHistorial() {
+  const version = ++versionHistorial;
+  historialCache = null;
   const url = (localStorage.getItem("cfg_url") || "").trim();
   const pin = (localStorage.getItem("cfg_pin") || "").trim();
   const contenedor = document.getElementById("listaHistorial");
 
-  if (!url || !pin) return;
+  if (!url || !pin) {
+    contenedor.innerHTML = `<p class="empty-msg">Configura la URL y el PIN para consultar el historial.</p>`;
+    return;
+  }
   contenedor.innerHTML = `<p class="empty-msg">Cargando últimas incidencias...</p>`;
 
   try {
-    const resp = await fetch(`${url}?pin=${encodeURIComponent(pin)}`);
-    const res = await resp.json();
-    if (res.ok) {
-      historialCache = res.historial || [];
-      renderizarHistorial(historialCache);
-    } else {
-      contenedor.innerHTML = `<p class="empty-msg">${escapeHtml(res.error || "Error al consultar")}</p>`;
+    const consulta = new URL(url, document.baseURI);
+    consulta.searchParams.set("pin", pin);
+    const res = await leerRespuesta(await fetch(consulta));
+    if (version !== versionHistorial) return;
+
+    const lista = res.historial ?? [];
+    if (!Array.isArray(lista)) {
+      throw new Error("El servidor devolvió un historial con un formato no válido");
     }
+    historialCache = lista.filter(item => item && typeof item === "object" && !Array.isArray(item));
+    filtrarHistorial();
   } catch (err) {
-    contenedor.innerHTML = `<p class="empty-msg">Error al cargar el historial.</p>`;
+    if (version !== versionHistorial) return;
+    contenedor.innerHTML = `<p class="empty-msg">Error al cargar el historial: ${escapeHtml(err?.message)}</p>`;
   }
 }
 
-function renderizarHistorial(lista) {
+function renderizarHistorial(lista, mensajeVacio) {
   const contenedor = document.getElementById("listaHistorial");
-  if (!lista || lista.length === 0) {
-    contenedor.innerHTML = `<p class="empty-msg">No hay incidencias registradas todavía.</p>`;
+  if (lista.length === 0) {
+    contenedor.innerHTML = `<p class="empty-msg">${mensajeVacio}</p>`;
     return;
   }
 
-  contenedor.innerHTML = lista.map(item => `
-    <div class="historial-item">
-      <h3>Pedido: ${escapeHtml(item.pedido)} — ${escapeHtml(item.proveedor)}</h3>
-      <div class="historial-meta">${escapeHtml(item.fecha)} ${escapeHtml(item.hora)} · ${escapeHtml(item.empresaEntrega)}</div>
-      <span class="historial-tag">${escapeHtml(item.categoria)} (${escapeHtml(item.detalle)})</span>
-      ${item.observaciones && item.observaciones !== "Ninguna" ? `<p class="historial-meta" style="margin-top:6px;">${escapeHtml(item.observaciones)}</p>` : ""}
-      ${item.fotoUrl && item.fotoUrl !== "Sin foto" ? `<br><a href="${escapeHtml(item.fotoUrl)}" target="_blank" rel="noopener" class="historial-link">Ver foto en Drive</a>` : ""}
-    </div>
-  `).join("");
+  contenedor.innerHTML = lista.map(item => {
+    const fotoUrl = obtenerEnlaceFoto(item.fotoUrl);
+    const detalle = item.detalle ? ` (${escapeHtml(item.detalle)})` : "";
+    return `
+      <div class="historial-item">
+        <h3>Pedido: ${escapeHtml(item.pedido)} — ${escapeHtml(item.proveedor)}</h3>
+        <div class="historial-meta">${escapeHtml(item.fecha)} ${escapeHtml(item.hora)} · ${escapeHtml(item.empresaEntrega)}</div>
+        <span class="historial-tag">${escapeHtml(item.categoria)}${detalle}</span>
+        ${item.observaciones && item.observaciones !== "Ninguna" ? `<p class="historial-meta" style="margin-top:6px;">${escapeHtml(item.observaciones)}</p>` : ""}
+        ${fotoUrl ? `<br><a href="${escapeHtml(fotoUrl)}" target="_blank" rel="noopener" class="historial-link">Ver foto en Drive</a>` : ""}
+      </div>
+    `;
+  }).join("");
 }
 
-function filtrarHistorial(e) {
-  const q = e.target.value.toLowerCase();
-  const filtrados = historialCache.filter(item =>
-    String(item.pedido).toLowerCase().includes(q) ||
-    String(item.proveedor).toLowerCase().includes(q) ||
-    String(item.empresaEntrega).toLowerCase().includes(q)
+function obtenerEnlaceFoto(valor) {
+  if (typeof valor !== "string" || !valor.trim() || valor.trim() === "Sin foto") return "";
+  try {
+    const enlace = new URL(valor, document.baseURI);
+    return enlace.protocol === "https:" || enlace.protocol === "http:" ? enlace.href : "";
+  } catch {
+    return "";
+  }
+}
+
+function filtrarHistorial() {
+  if (historialCache === null) return;
+  const consulta = document.getElementById("buscadorHistorial").value.trim().toLowerCase();
+  const filtrados = historialCache.filter(({ pedido, proveedor, empresaEntrega }) =>
+    [pedido, proveedor, empresaEntrega].some(valor => String(valor ?? "").toLowerCase().includes(consulta))
   );
-  renderizarHistorial(filtrados);
+  const mensajeVacio = historialCache.length
+    ? "No hay incidencias que coincidan con la búsqueda."
+    : "No hay incidencias registradas todavía.";
+  renderizarHistorial(filtrados, mensajeVacio);
 }
 
 function abrirModalConfig() {
@@ -320,6 +394,7 @@ function guardarConfiguracion() {
   }
   localStorage.setItem("cfg_url", url);
   localStorage.setItem("cfg_pin", pin);
+  invalidarHistorial();
   document.getElementById("modalConfig").classList.add("hidden");
   mostrarToast("Configuración guardada en este dispositivo");
 }
@@ -328,14 +403,15 @@ function mostrarToast(msg) {
   const toast = document.getElementById("toast");
   toast.textContent = msg;
   toast.classList.remove("hidden");
-  setTimeout(() => toast.classList.add("hidden"), 3500);
+  clearTimeout(temporizadorToast);
+  temporizadorToast = setTimeout(() => toast.classList.add("hidden"), 3500);
 }
 
 function escapeHtml(str) {
   return String(str ?? "")
-    .replace(/&/g, "&")
-    .replace(/</g, "<")
-    .replace(/>/g, ">")
-    .replace(/"/g, """)
-    .replace(/'/g, "'");
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
