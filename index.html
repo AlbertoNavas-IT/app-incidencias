@@ -64,17 +64,15 @@
 
       <!-- 3. Evidencia y notas -->
       <section class="card">
-        <h2>3. Foto y Observaciones</h2>
-        
-        <label class="camera-btn" for="fotoInput">
-          📸 <span id="fotoLabelText">Hacer / Adjuntar Foto</span>
-        </label>
-        <input type="file" id="fotoInput" accept="image/*" capture="environment" class="hidden">
-
-        <div id="previewContainer" class="preview-box hidden">
-          <img id="fotoPreview" alt="Vista previa">
-          <button type="button" id="btnQuitarFoto" class="btn-danger-small">❌ Quitar foto</button>
+        <h2>3. Fotos y observaciones</h2>
+        <div class="acciones-foto">
+          <button class="camera-btn" type="button" id="abrirCamara">Hacer foto</button>
+          <button class="camera-btn" type="button" id="abrirGaleria">Añadir de la galería</button>
         </div>
+        <input type="file" id="camara" accept="image/*" capture="environment" hidden>
+        <input type="file" id="galeria" accept="image/*" multiple hidden>
+        <p id="estadoFotos" class="sub-title" aria-live="polite">Hasta 8 fotos por incidencia.</p>
+        <div id="previewContainer" class="preview-box"></div>
 
         <label for="observaciones" style="margin-top: 12px;">Observaciones (opcional)</label>
         <textarea id="observaciones" rows="2" placeholder="Algún detalle extra para tus jefes..."></textarea>
@@ -103,17 +101,17 @@
   <div id="modalConfig" class="modal hidden">
     <div class="modal-content">
       <h2>⚙️ Conexión Privada</h2>
-      <p class="info-text">Estos datos se guardan <strong>solo en tu teléfono</strong>, nunca en GitHub.</p>
+      <p class="info-text">La contraseña se mantiene mientras la app está abierta.</p>
       
       <label for="cfgUrl">URL del Script de Google (/exec)</label>
       <input type="url" id="cfgUrl" placeholder="https://script.google.com/macros/s/.../exec">
 
-      <label for="cfgPin">Tu PIN Secreto</label>
-      <input type="password" id="cfgPin" inputmode="numeric" placeholder="Tu PIN privado">
+      <label for="cfgClave">Contraseña</label>
+      <input type="password" id="cfgClave" autocomplete="current-password" minlength="16" maxlength="256" placeholder="Tu contraseña">
 
       <div class="modal-actions">
         <button type="button" id="btnCerrarConfig" class="btn-secondary">Cancelar</button>
-        <button type="button" id="btnGuardarConfig" class="btn-primary">Guardar</button>
+        <button type="button" id="btnGuardarConfig" class="btn-primary">Conectar</button>
       </div>
     </div>
   </div>

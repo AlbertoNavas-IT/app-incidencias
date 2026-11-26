@@ -17,22 +17,26 @@ const SUBOPCIONES = {
 
 let categoriaSeleccionada = "";
 let detallesSeleccionados = new Set();
-let fotoComprimidaBase64 = "";
-let procesamientoFoto = null;
+const fotos = [];
+const MAX_FOTOS = 8;
+const MAX_BASE64 = 16 * 1024 * 1024;
+let procesandoFotos = false;
+let claveSesion = "";
+let ultimoIntento = null;
 let historialCache = null;
 let versionHistorial = 0;
 let temporizadorToast;
 
 document.addEventListener("DOMContentLoaded", () => {
   cargarSugerenciasLocales();
+  localStorage.removeItem("cfg_pin");
   verificarConfiguracionInicial();
   configurarEventos();
 });
 
 function verificarConfiguracionInicial() {
   const url = (localStorage.getItem("cfg_url") || "").trim();
-  const pin = (localStorage.getItem("cfg_pin") || "").trim();
-  if (!url || !pin) {
+  if (!url || !claveSesion) {
     abrirModalConfig();
   }
 }
@@ -61,35 +65,15 @@ function configurarEventos() {
     });
   });
 
-  document.getElementById("fotoInput").addEventListener("change", async (e) => {
-    const file = e.target.files[0];
-    if (!file) {
-      limpiarFoto();
-      return;
-    }
-    const proceso = comprimirImagen(file, 1280, 0.78);
-    procesamientoFoto = proceso;
-    mostrarToast("Procesando foto...");
-    try {
-      const dataUrl = await proceso;
-      if (procesamientoFoto !== proceso) return;
-
-      fotoComprimidaBase64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
-      document.getElementById("fotoPreview").src = dataUrl;
-      document.getElementById("previewContainer").classList.remove("hidden");
-      document.getElementById("fotoLabelText").textContent = "Cambiar foto";
-      mostrarToast("Foto lista");
-    } catch {
-      if (procesamientoFoto === proceso) {
-        limpiarFoto();
-        mostrarToast("No se pudo procesar la foto");
-      }
-    } finally {
-      if (procesamientoFoto === proceso) procesamientoFoto = null;
-    }
-  });
-
-  document.getElementById("btnQuitarFoto").addEventListener("click", limpiarFoto);
+  for (const [boton, entrada] of [["abrirCamara", "camara"], ["abrirGaleria", "galeria"]]) {
+    const input = document.getElementById(entrada);
+    document.getElementById(boton).addEventListener("click", () => input.click());
+    input.addEventListener("change", () => {
+      const archivos = Array.from(input.files);
+      input.value = "";
+      agregarFotos(archivos);
+    });
+  }
 
   document.getElementById("formIncidencia").addEventListener("submit", enviarIncidencia);
 
@@ -134,13 +118,56 @@ function renderizarSubopciones(categoria) {
   container.classList.remove("hidden");
 }
 
-function limpiarFoto() {
-  procesamientoFoto = null;
-  fotoComprimidaBase64 = "";
-  document.getElementById("fotoInput").value = "";
-  document.getElementById("fotoPreview").removeAttribute("src");
-  document.getElementById("previewContainer").classList.add("hidden");
-  document.getElementById("fotoLabelText").textContent = "Hacer / Adjuntar Foto";
+function mostrarFotos() {
+  const contenedor = document.getElementById("previewContainer");
+  contenedor.replaceChildren();
+  fotos.forEach((foto, indice) => {
+    const figura = document.createElement("figure");
+    const imagen = document.createElement("img");
+    imagen.src = "data:image/jpeg;base64," + foto;
+    imagen.alt = "Foto " + (indice + 1);
+    const quitar = document.createElement("button");
+    quitar.type = "button";
+    quitar.className = "btn-danger-small";
+    quitar.textContent = "Quitar foto " + (indice + 1);
+    quitar.addEventListener("click", () => {
+      fotos.splice(indice, 1);
+      mostrarFotos();
+    });
+    figura.append(imagen, quitar);
+    contenedor.append(figura);
+  });
+  document.getElementById("estadoFotos").textContent = procesandoFotos
+    ? "Procesando fotos…" : fotos.length + " de " + MAX_FOTOS + " fotos";
+}
+
+async function agregarFotos(archivos) {
+  if (!archivos.length || procesandoFotos) return;
+  if (archivos.length + fotos.length > MAX_FOTOS) {
+    mostrarToast("Puedes adjuntar hasta " + MAX_FOTOS + " fotos por incidencia");
+    return;
+  }
+  procesandoFotos = true;
+  const botones = ["abrirCamara", "abrirGaleria"].map(id => document.getElementById(id));
+  botones.forEach(boton => { boton.disabled = true; });
+  mostrarFotos();
+  try {
+    const nuevas = [];
+    for (const archivo of archivos) {
+      const jpeg = await comprimirImagen(archivo, 1280, 0.78);
+      nuevas.push(jpeg.slice(jpeg.indexOf(",") + 1));
+    }
+    if ([...fotos, ...nuevas].reduce((total, foto) => total + foto.length, 0) > MAX_BASE64) {
+      throw new Error("Las fotos superan los 12 MB. Añade menos fotos.");
+    }
+    fotos.push(...nuevas);
+  } catch (err) {
+    mostrarToast(err.message.includes("12 MB") ? err.message : "No se pudo añadir la selección. Comprueba las imágenes.");
+  } finally {
+    procesandoFotos = false;
+    botones.forEach(boton => { boton.disabled = false; });
+    mostrarFotos();
+  }
 }
 
 async function comprimirImagen(file, maxLado, calidad) {
@@ -173,11 +200,10 @@ async function enviarIncidencia(e) {
   if (btnEnviar.disabled) return;
 
   const url = (localStorage.getItem("cfg_url") || "").trim();
-  const pin = (localStorage.getItem("cfg_pin") || "").trim();
 
-  if (!url || !pin) {
+  if (!url || !claveSesion) {
     abrirModalConfig();
-    mostrarToast("Configura primero tu URL y PIN");
+    mostrarToast("Configura primero tu URL y contraseña");
     return;
   }
 
@@ -194,8 +220,8 @@ async function enviarIncidencia(e) {
     mostrarToast("Selecciona qué tipo de incidencia ocurre");
     return;
   }
-  if (procesamientoFoto) {
-    mostrarToast("Espera a que termine de procesarse la foto");
+  if (procesandoFotos) {
+    mostrarToast("Espera a que termine de procesarse las fotos");
     return;
   }
 
@@ -206,33 +232,31 @@ async function enviarIncidencia(e) {
   btnEnviar.textContent = "Guardando y enviando correo...";
 
   const payload = {
-    pin: pin,
+    accion: "registrar",
     pedido: pedido,
     proveedor: proveedor,
     empresaEntrega: empresaEntrega,
     categoria: categoriaSeleccionada,
     detalle: Array.from(detallesSeleccionados).join(", "),
     observaciones: observaciones,
-    fotoBase64: fotoComprimidaBase64
+    fotosBase64: fotos.slice()
   };
 
   try {
-    const resp = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "text/plain;charset=utf-8"
-      },
-      body: JSON.stringify(payload)
-    });
-
-    await leerRespuesta(resp);
+    const bytes = new TextEncoder().encode(JSON.stringify(payload));
+    const hash = await crypto.subtle.digest("SHA-256", bytes);
+    const firma = Array.from(new Uint8Array(hash)).join(",");
+    if (ultimoIntento?.firma !== firma) {
+      ultimoIntento = { firma, id: crypto.randomUUID() };
+    }
+    const resultado = await solicitar(url, claveSesion, { ...payload, id: ultimoIntento.id });
 
     guardarSugerenciaLocal("proveedores", proveedor);
     guardarSugerenciaLocal("transportes", empresaEntrega);
     cargarSugerenciasLocales();
     limpiarFormulario();
     invalidarHistorial();
-    mostrarToast("Registrado y correo enviado");
+    mostrarToast(resultado.aviso || "Registrado y correo enviado");
   } catch (err) {
     mostrarToast("Fallo al enviar: " + (err?.message || "revisa URL/red"));
   } finally {
@@ -257,10 +281,12 @@ async function leerRespuesta(resp) {
 }
 
 function limpiarFormulario() {
+  ultimoIntento = null;
   document.getElementById("formIncidencia").reset();
   categoriaSeleccionada = "";
   detallesSeleccionados.clear();
-  limpiarFoto();
+  fotos.length = 0;
+  mostrarFotos();
   document.querySelectorAll(".cat-btn").forEach(b => b.classList.remove("selected"));
   document.getElementById("chipsContainer").replaceChildren();
   document.getElementById("subopcionesContainer").classList.add("hidden");
@@ -308,19 +334,16 @@ async function cargarHistorial() {
   const version = ++versionHistorial;
   historialCache = null;
   const url = (localStorage.getItem("cfg_url") || "").trim();
-  const pin = (localStorage.getItem("cfg_pin") || "").trim();
   const contenedor = document.getElementById("listaHistorial");
 
-  if (!url || !pin) {
-    contenedor.innerHTML = `<p class="empty-msg">Configura la URL y el PIN para consultar el historial.</p>`;
+  if (!url || !claveSesion) {
+    contenedor.innerHTML = `<p class="empty-msg">Configura la URL y la contraseña para consultar el historial.</p>`;
     return;
   }
   contenedor.innerHTML = `<p class="empty-msg">Cargando últimas incidencias...</p>`;
 
   try {
-    const consulta = new URL(url, document.baseURI);
-    consulta.searchParams.set("pin", pin);
-    const res = await leerRespuesta(await fetch(consulta));
+    const res = await solicitar(url, claveSesion, { accion: "historial" });
     if (version !== versionHistorial) return;
 
     const lista = res.historial ?? [];
@@ -343,7 +366,10 @@ function renderizarHistorial(lista, mensajeVacio) {
   }
 
   contenedor.innerHTML = lista.map(item => {
-    const fotoUrl = obtenerEnlaceFoto(item.fotoUrl);
+    const enlaces = (item.fotoUrls || [item.fotoUrl]).map(obtenerEnlaceFoto).filter(Boolean);
+    const fotosHtml = enlaces.map((url, i) =>
+      `<br><a href="${escapeHtml(url)}" target="_blank" rel="noopener" class="historial-link">Ver foto ${i + 1}</a>`
+    ).join("");
     const detalle = item.detalle ? ` (${escapeHtml(item.detalle)})` : "";
     return `
       <div class="historial-item">
@@ -351,7 +377,7 @@ function renderizarHistorial(lista, mensajeVacio) {
         <div class="historial-meta">${escapeHtml(item.fecha)} ${escapeHtml(item.hora)} · ${escapeHtml(item.empresaEntrega)}</div>
         <span class="historial-tag">${escapeHtml(item.categoria)}${detalle}</span>
         ${item.observaciones && item.observaciones !== "Ninguna" ? `<p class="historial-meta" style="margin-top:6px;">${escapeHtml(item.observaciones)}</p>` : ""}
-        ${fotoUrl ? `<br><a href="${escapeHtml(fotoUrl)}" target="_blank" rel="noopener" class="historial-link">Ver foto en Drive</a>` : ""}
+        ${fotosHtml}
       </div>
     `;
   }).join("");
@@ -381,22 +407,46 @@ function filtrarHistorial() {
 
 function abrirModalConfig() {
   document.getElementById("cfgUrl").value = localStorage.getItem("cfg_url") || "";
-  document.getElementById("cfgPin").value = localStorage.getItem("cfg_pin") || "";
+  document.getElementById("cfgClave").value = "";
   document.getElementById("modalConfig").classList.remove("hidden");
 }
 
-function guardarConfiguracion() {
+async function solicitar(url, clave, datos) {
+  if (!/^https:\/\/script\.google\.com\/macros\/s\/[a-zA-Z0-9_-]+\/exec$/.test(url)) {
+    throw new Error("Introduce la URL de Google Apps Script que termina en /exec");
+  }
+  const respuesta = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify({ ...datos, clave })
+  });
+  return leerRespuesta(respuesta);
+}
+
+async function guardarConfiguracion() {
   const url = document.getElementById("cfgUrl").value.trim();
-  const pin = document.getElementById("cfgPin").value.trim();
-  if (!url || !pin) {
-    mostrarToast("Rellena ambos campos");
+  const campo = document.getElementById("cfgClave");
+  const clave = campo.value;
+  if (!url || clave.length < 16 || clave.length > 256) {
+    mostrarToast("Introduce la URL y una contraseña de 16 a 256 caracteres");
     return;
   }
-  localStorage.setItem("cfg_url", url);
-  localStorage.setItem("cfg_pin", pin);
-  invalidarHistorial();
-  document.getElementById("modalConfig").classList.add("hidden");
-  mostrarToast("Configuración guardada en este dispositivo");
+  const boton = document.getElementById("btnGuardarConfig");
+  if (boton.disabled) return;
+  boton.disabled = true;
+  try {
+    await solicitar(url, clave, { accion: "conectar" });
+    localStorage.setItem("cfg_url", url);
+    claveSesion = clave;
+    campo.value = "";
+    invalidarHistorial();
+    document.getElementById("modalConfig").classList.add("hidden");
+    mostrarToast("Conexión verificada");
+  } catch (err) {
+    mostrarToast(err.message);
+  } finally {
+    boton.disabled = false;
+  }
 }
 
 function mostrarToast(msg) {
